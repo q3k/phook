@@ -1,5 +1,5 @@
-#ifndef __PTRACEHOOK_H__
-#define __PTRACEHOOK_H__
+#ifndef __PHOOK_H__
+#define __PHOOK_H__
 
 // Copyright (c) 2016, Sergiusz Bazanski <sergiusz@bazanski.pl>
 //
@@ -78,4 +78,4 @@ const char *phook_errstr(phook_error_t err) {
 phook_error_t phook_fork_exec_trace(const char *command, char *const argv[], pid_t *out);
 phook_error_t phook_process_allocate(pid_t process, uint64_t size, uint64_t *out);
 
-#endif // __PTRACEHOOK_H__
+#endif // __PHOOK_H__
