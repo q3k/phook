@@ -1,7 +1,21 @@
+// Copyright (c) 2016, Sergiusz Bazanski <sergiusz@bazanski.pl>
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+// IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 #include "ptracehook.h"
 
 // Allocation shellcode template
-const char *shellcode_template = 
+static const char *shellcode_template =
 // xor rdi, rdi               - don't care about mmap base
     "\x48\x31\xff"
 // mov rax, 9
@@ -21,11 +35,12 @@ const char *shellcode_template =
 // int 0x03
     "\xcd\x03"
 ;
-const uint32_t shellcode_address_offset = 12;
-const uint32_t shellcode_int_offset = 42;
-const uint32_t shellcode_size = 44;
+static const uint32_t shellcode_address_offset = 12;
+static const uint32_t shellcode_int_offset = 42;
+static const uint32_t shellcode_size = 44;
 
-static phook_error_t shellcode_generate(uint8_t *out, uint32_t *size, uint64_t alloc_size)
+static phook_error_t
+shellcode_generate(uint8_t *out, uint32_t *size, uint64_t alloc_size)
 {
     if (!size) {
         return NULL_POINTER;
@@ -49,7 +64,8 @@ static phook_error_t shellcode_generate(uint8_t *out, uint32_t *size, uint64_t a
 static const char *process_proc = "/proc/";
 static const char *process_exe = "/exe";
 
-static phook_error_t process_get_entrypoint(pid_t process, uint64_t *entrypoint)
+static phook_error_t
+process_get_entrypoint(pid_t process, uint64_t *entrypoint)
 {
     uint32_t malloc_size = strlen(process_proc) + strlen(process_exe) + 30;
     char *name = (char *)malloc(malloc_size);
@@ -97,7 +113,8 @@ fail:
     return res;
 }
 
-phook_error_t phook_fork_exec_trace(const char *command, char *const argv[], pid_t *out)
+phook_error_t
+phook_fork_exec_trace(const char *command, char *const argv[], pid_t *out)
 {
     if (!out) {
         return NULL_POINTER;
@@ -125,7 +142,8 @@ phook_error_t phook_fork_exec_trace(const char *command, char *const argv[], pid
     return INTERNAL_ERROR;
 }
 
-phook_error_t phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
+phook_error_t
+phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
 {
     uint64_t entry;
     phook_error_t res = INTERNAL_ERROR;
@@ -163,7 +181,7 @@ phook_error_t phook_process_allocate(pid_t process, uint64_t size, uint64_t *out
     if ((res = shellcode_generate(shellcode, &written, size)) != OK) {
         goto fail;
     }
-    
+
     // Copy original code
     for (i = 0; i < (shellcode_size/8); i++) {
         uint64_t *dest = (uint64_t *)(original + i * 8);
@@ -185,7 +203,7 @@ phook_error_t phook_process_allocate(pid_t process, uint64_t size, uint64_t *out
 
     memcpy(&changed_regs, &regs, sizeof(regs));
     changed_regs.rip = entry + 2;
-    
+
     if (ptrace(PTRACE_SETREGS, process, NULL, &changed_regs) == -1) {
         res = PTRACE_FAILED;
         goto fail;
@@ -263,7 +281,7 @@ int main(int argc, char **argv)
     uint64_t buffer;
     printf("fork_exec_trace(): %s\n",
             phook_errstr(phook_fork_exec_trace(cargv[0], cargv, &child)));
-    printf("process_allocate(): %s\n", 
+    printf("process_allocate(): %s\n",
             phook_errstr(phook_process_allocate(child, 0x1000, &buffer)));
     printf("rwx buffer is 0x%016lx\n", buffer);
 

@@ -1,6 +1,20 @@
 #ifndef __PTRACEHOOK_H__
 #define __PTRACEHOOK_H__
 
+// Copyright (c) 2016, Sergiusz Bazanski <sergiusz@bazanski.pl>
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
+// SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+// IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -21,6 +35,7 @@
 #error "ptracehook only support 64-bit Intel code!"
 #endif // def __x86_64__
 
+// Error handling definitions
 typedef enum {
     OK = 0,
 
@@ -58,5 +73,9 @@ const char *phook_errstr(phook_error_t err) {
             return "An unknown error occured";
     }
 }
+
+// Forward declarations of public functions
+phook_error_t phook_fork_exec_trace(const char *command, char *const argv[], pid_t *out);
+phook_error_t phook_process_allocate(pid_t process, uint64_t size, uint64_t *out);
 
 #endif // __PTRACEHOOK_H__
