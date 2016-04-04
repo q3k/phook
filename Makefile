@@ -1,1 +1,1 @@
-CFLAGS := -Wall -Werror -lelf
+CFLAGS := -Wall -Werror -lelf -lcapstone -std=c99

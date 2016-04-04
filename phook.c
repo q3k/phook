@@ -12,52 +12,101 @@
 // ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 // IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+#define _POSIX_SOURCE
+#include <fcntl.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/ptrace.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+
+#include <libelf.h>
+#include <capstone/capstone.h>
+
 #include "phook.h"
 
-// Allocation shellcode template
-static const char *shellcode_template =
-// xor rdi, rdi               - don't care about mmap base
-    "\x48\x31\xff"
-// mov rax, 9
-    "\x48\xc7\xc0\x09\x00\x00\x00"
-// mov rsi, 0xdeadbeefcafebabe - template for allocation size
-    "\x48\xbe\xbe\xba\xfe\xca\xef\xbe\xad\xde"
-// mov rdx, 7                 - PROT_EXEC | PROT_WRITE | PROT_EAD
-    "\x48\xc7\xc2\x07\x00\x00\x00"
-// mov r10, 0x22              - MAP_PRIVATE | MAP_ANONYMOUS
-    "\x49\xc7\xc2\x22\x00\x00\x00"
-// xor r8, r8                 - zero fd
-    "\x4d\x31\xc0"
-// xor r9, r9                 - zero fd offset
-    "\x4d\x31\xc9"
-// syscall
-    "\x0f\x05"
-// int 0x03
-    "\xcd\x03"
-;
-static const uint32_t shellcode_address_offset = 12;
-static const uint32_t shellcode_int_offset = 42;
-static const uint32_t shellcode_size = 44;
+const char *phook_errstr(phook_error_t err) {
+    switch (err) {
+        case OK:
+            return "Success";
+        case NULL_POINTER:
+            return "Pointer in function call was NULL";
+        case INTERNAL_ERROR:
+            return "An internal programming error occured";
+        case COULDNT_OPEN_PROC:
+            return "Could not open process' /proc/PID/exe file";
+        case LIBELF_ERROR:
+            return "An unexpected libelf error occured";
+        case INVALID_ELF:
+            return "Process' binary is not an ELF64";
+        case MALLOC_FAILED:
+            return "A malloc() call failed";
+        case FORK_FAILED:
+            return "A fork() call failed";
+        case PTRACE_FAILED:
+            return "A ptrace() call failed";
+        case CAPSTONE_ERROR:
+            return "An unexpected capstone error occured";
+        case COULDNT_SPLIT:
+            return "Could not split instructions for hook";
+        case COULDNT_ASSEMBLE:
+            return "Could not assemble a trampoline";
+        default:
+            return "An unknown error occured";
+    }
+}
+
+
+// mmap(2) allocation shellcode template
+// Runs mmap(0, size, PROT_EXEC|PROT_WRITE|PROT_READ,
+//           MAP_PRIVATE|MAP_ANONYMOUS, 0, 0)
+struct {
+    uint8_t code_0[12];
+    uint64_t size;
+    uint8_t code_1[22];
+    uint8_t trap[2];
+} __attribute__((packed)) mmap_shellcode = {
+    .code_0 = { 0x48, 0x31, 0xff,                         // xor rdi, rdi
+                0x48, 0xc7, 0xc0, 0x09, 0x00, 0x00, 0x00, // mov rax, 9
+                0x48, 0xbe                                // mov rsi, $address
+    },
+    .size = 0xdeadbeefcafebabe,
+    .code_1 = { 0x48, 0xc7, 0xc2, 0x07, 0x00, 0x00, 0x00, // mov rdx, 7
+                0x49, 0xc7, 0xc2, 0x22, 0x00, 0x00, 0x00, // mov r10, 0x22
+                0x4d, 0x31, 0xc0,                         // xor r8, r8
+                0x4d, 0x31, 0xc9,                         // xor r9, r9
+                0x0f, 0x05                                // syscall
+    },
+    .trap = { 0xcd, 0x03 }                                // int 0x03
+};
 
 static phook_error_t
-shellcode_generate(uint8_t *out, uint32_t *size, uint64_t alloc_size)
+mmap_generate(uint8_t *out, uint32_t *size, uint64_t alloc_size)
 {
     if (!size) {
         return NULL_POINTER;
     }
 
     if (!out) {
-        *size = shellcode_size;
+        *size = sizeof(mmap_shellcode);
         return OK;
     }
 
-    memcpy(out, shellcode_template, shellcode_size);
-    uint64_t *address = (uint64_t *)(out + shellcode_address_offset);
+    memcpy(out, &mmap_shellcode, sizeof(mmap_shellcode));
+
+    uint64_t offset = (void *)&mmap_shellcode.size - (void *)&mmap_shellcode;
+    uint64_t *address = (uint64_t *)(out + offset);
     if (*address != 0xdeadbeefcafebabe) {
         return INTERNAL_ERROR;
     }
     *address = alloc_size;
-    *size = shellcode_size;
+    *size = sizeof(mmap_shellcode);
     return OK;
 }
 
@@ -165,7 +214,7 @@ phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
     printf("process_allocate(): rip: 0x%016llx\n", regs.rip);
 
     uint32_t shellcode_size;
-    if ((res = shellcode_generate(NULL, &shellcode_size, size)) != OK) {
+    if ((res = mmap_generate(NULL, &shellcode_size, size)) != OK) {
         return res;
     }
     // Align to 8 bytes (word)
@@ -178,7 +227,7 @@ phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
         return MALLOC_FAILED;
     }
 
-    if ((res = shellcode_generate(shellcode, &written, size)) != OK) {
+    if ((res = mmap_generate(shellcode, &written, size)) != OK) {
         goto fail;
     }
 
@@ -213,6 +262,8 @@ phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
         goto fail;
     }
 
+    uint64_t offset = (void*)&mmap_shellcode.trap - (void*)&mmap_shellcode;
+    //TODO(q3k): Clean this up, set up some timeouts and whatnot
     while (1) {
         int status;
         waitpid(process, &status, 0);
@@ -222,7 +273,7 @@ phook_process_allocate(pid_t process, uint64_t size, uint64_t *out)
                     res = PTRACE_FAILED;
                     goto fail;
                 }
-                if (run_regs.rip == entry + shellcode_int_offset + 2) {
+                if (run_regs.rip == entry + offset + 2) {
                     printf("process_allocate(): hit interrupt in target\n");
                     break;
                 }
@@ -265,6 +316,109 @@ fail:
     return res;
 }
 
+static phook_error_t
+find_instruction_boundary(pid_t process, uint64_t start_address,
+        uint64_t min_bytes, uint64_t *boundary)
+{
+    uint64_t maximum_words = 10; // Sanity limit
+    uint64_t i;
+    uint8_t instructions[maximum_words*8];
+    uint64_t *words = (uint64_t *)instructions;
+    csh capstone;
+    cs_insn *insn;
+
+    if (boundary == NULL) {
+        return NULL_POINTER;
+    }
+
+    if (min_bytes > maximum_words * 8) {
+        return COULDNT_SPLIT;
+    }
+
+    if (cs_open(CS_ARCH_X86, CS_MODE_64, &capstone) != CS_ERR_OK) {
+        return CAPSTONE_ERROR;
+    }
+
+    size_t count;
+    phook_error_t res;
+    for (i = 0; i < maximum_words; i++) {
+        uint64_t bytes_present = i * 8;
+        void *src = (uint8_t *)start_address + bytes_present;
+        if ((words[i] = ptrace(PTRACE_PEEKDATA, process, src, NULL)) == -1) {
+            return PTRACE_FAILED;
+        }
+
+        if (i * 8 < min_bytes) {
+            continue;
+        }
+
+        count = cs_disasm(capstone, instructions, bytes_present,
+                start_address, 0, &insn);
+        if (count <= 0) {
+            return CAPSTONE_ERROR;
+        }
+
+        for (uint64_t j = 0; j < count; j++) {
+            // How many bytes do the disassembled instructions take up
+            uint64_t used_bytes = insn[j].address - start_address;
+            if (used_bytes >= min_bytes) {
+                *boundary = used_bytes;
+                res = OK;
+                goto cleanup;
+            }
+        }
+
+        cs_free(insn, count);
+        count = 0;
+    }
+
+cleanup:
+    if (count) {
+        cs_free(insn, count);
+    }
+    cs_close(&capstone);
+    return res;
+}
+
+struct {
+    uint8_t code_0[6];
+    uint64_t address;
+    uint8_t code_1;
+} __attribute__((packed)) detour_shellcode = {
+    .code_0 = {
+        0x48, 0x83, 0xec, 0x08, // sub rsp, 8
+        0x00, 0xff              // mov [rsp], address
+    },
+    .address = 0xdeadbeefcafebabe,
+    .code_1 = 0xc3  // ret
+};
+
+static phook_error_t
+assemble_detour(uint64_t source, uint64_t target, uint8_t *out, uint64_t *len)
+{
+    // Unused for now. Can be used to detect and generate E9-base relative jumps
+    (void) source;
+
+    if (len == NULL) {
+        return NULL_POINTER;
+    }
+
+    *len = sizeof(detour_shellcode);
+    if (out == NULL) {
+        return OK;
+    }
+
+    memcpy(out, &detour_shellcode, sizeof(detour_shellcode));
+    uint64_t offset = (void *)&detour_shellcode.address - (void *)&detour_shellcode;
+    uint64_t *address = (uint64_t *)(out + offset);
+
+    if (*address != 0xdeadbeefcafebabe) {
+        return INTERNAL_ERROR;
+    }
+    *address = target;
+
+    return OK;
+}
 
 
 // Temporary test stuff
@@ -284,6 +438,17 @@ int main(int argc, char **argv)
     printf("process_allocate(): %s\n",
             phook_errstr(phook_process_allocate(child, 0x1000, &buffer)));
     printf("rwx buffer is 0x%016lx\n", buffer);
+    uint64_t boundary;
+
+
+    printf("find_instruction_boundary(): %s\n",
+            phook_errstr(find_instruction_boundary(child, 0x00000000004005e6, 7, &boundary)));
+    printf("boundary is %li bytes\n", boundary);
+    uint8_t foo[32];
+    uint64_t foo_size;
+    printf("assemble_detour(): %s\n",
+            phook_errstr(assemble_detour(0x00000000004005e6, buffer, foo, &foo_size)));
+
 
     ptrace(PTRACE_DETACH, child, NULL, NULL);
     int options;
