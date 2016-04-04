@@ -19,6 +19,8 @@
 #error "ptracehook only support 64-bit Intel code!"
 #endif // def __x86_64__
 
+#include <sys/types.h>
+
 // Error handling definitions
 typedef enum {
     OK = 0,
