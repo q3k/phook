@@ -65,7 +65,7 @@ phook_error_t phook_process_allocate(pid_t process, uint64_t size,
 
 // Find a instruction boundary after a certain treshold (useful for finding
 // trampoline sites so that no instructions are split)
-// process: pid_t of process
+// process: pid_t of process or 0 for local
 // start_address: start of disassembly
 // min_bytes: how many bytes at minimum do we want the instructions to occupy
 // boundary: pointer to the address of resulting instruction boundary

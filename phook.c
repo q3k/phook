@@ -344,8 +344,13 @@ phook_find_instruction_boundary(pid_t process, uint64_t start_address,
     for (i = 0; i < maximum_words; i++) {
         uint64_t bytes_present = i * 8;
         void *src = (uint8_t *)start_address + bytes_present;
-        if ((words[i] = ptrace(PTRACE_PEEKDATA, process, src, NULL)) == -1) {
-            return PTRACE_FAILED;
+        if (process == 0) {
+            words[i] = *((uint64_t *)src);
+        } else {
+            if ((words[i] = ptrace(PTRACE_PEEKDATA, process, src, NULL)) == -1)
+            {
+                return PTRACE_FAILED;
+            }
         }
 
         if (i * 8 < min_bytes) {
