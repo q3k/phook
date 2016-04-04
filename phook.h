@@ -20,6 +20,7 @@
 #endif // def __x86_64__
 
 #include <sys/types.h>
+#include <stdint.h>
 
 // Error handling definitions
 typedef enum {
