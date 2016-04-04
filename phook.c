@@ -316,8 +316,8 @@ fail:
     return res;
 }
 
-static phook_error_t
-find_instruction_boundary(pid_t process, uint64_t start_address,
+phook_error_t
+phook_find_instruction_boundary(pid_t process, uint64_t start_address,
         uint64_t min_bytes, uint64_t *boundary)
 {
     uint64_t maximum_words = 10; // Sanity limit
@@ -393,8 +393,8 @@ struct {
     .code_1 = 0xc3  // ret
 };
 
-static phook_error_t
-assemble_detour(uint64_t source, uint64_t target, uint8_t *out, uint64_t *len)
+phook_error_t
+phook_assemble_detour(uint64_t source, uint64_t target, uint8_t *out, uint64_t *len)
 {
     // Unused for now. Can be used to detect and generate E9-base relative jumps
     (void) source;
@@ -418,41 +418,4 @@ assemble_detour(uint64_t source, uint64_t target, uint8_t *out, uint64_t *len)
     *address = target;
 
     return OK;
-}
-
-
-// Temporary test stuff
-#include <stdio.h>
-#include <sys/mman.h>
-
-char *const cargv[] = {
-    "./victim",
-    NULL
-};
-int main(int argc, char **argv)
-{
-    pid_t child;
-    uint64_t buffer;
-    printf("fork_exec_trace(): %s\n",
-            phook_errstr(phook_fork_exec_trace(cargv[0], cargv, &child)));
-    printf("process_allocate(): %s\n",
-            phook_errstr(phook_process_allocate(child, 0x1000, &buffer)));
-    printf("rwx buffer is 0x%016lx\n", buffer);
-    uint64_t boundary;
-
-
-    printf("find_instruction_boundary(): %s\n",
-            phook_errstr(find_instruction_boundary(child, 0x00000000004005e6, 7, &boundary)));
-    printf("boundary is %li bytes\n", boundary);
-    uint8_t foo[32];
-    uint64_t foo_size;
-    printf("assemble_detour(): %s\n",
-            phook_errstr(assemble_detour(0x00000000004005e6, buffer, foo, &foo_size)));
-
-
-    ptrace(PTRACE_DETACH, child, NULL, NULL);
-    int options;
-    waitpid(child, &options, 0);
-
-    return 0;
 }
