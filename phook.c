@@ -13,6 +13,7 @@
 // IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #define _POSIX_SOURCE
+#define _GNU_SOURCE
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,6 +21,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
+#include <sys/mman.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -386,23 +388,14 @@ cleanup:
 }
 
 struct {
-    uint8_t code_0[11];
+    uint8_t code_0[7];
     uint64_t address;
-    uint8_t code_1[7];
 } __attribute__((packed)) detour_shellcode = {
     .code_0 = {
-        0x48, 0x83, 0xec, 0x08, // sub rsp, 8
-        0x50,                   // push rax
-        0x48, 0x83, 0xc4, 0x10, // add rsp, 16
-        0x48, 0xb8,             // mox rax, address
+        0xff, 0x35, 0x01, 0x00, 0x00, 0x00, // push [rip+1]
+        0xc3                                // ret
     },
-    .address = 0xdeadbeefcafebabe,
-    .code_1 = {
-        0x50,                   // push rax
-        0x48, 0x83, 0xec, 0x08, // sub rsp, 8
-        0x58,                   // pop rax
-        0xc3                    // ret
-    }
+    .address = 0xdeadbeefcafebabe
 };
 
 phook_error_t
@@ -428,6 +421,55 @@ phook_assemble_detour(uint64_t source, uint64_t target, uint8_t *out, uint64_t *
         return INTERNAL_ERROR;
     }
     *address = target;
+
+    return OK;
+}
+
+phook_error_t
+phook_local_hook(void *source, void *target, void **return_trampoline)
+{
+    uint64_t detour_length, prologue_length;
+    phook_error_t err;
+
+    // First, let's check what the detour size is for source->target jump
+    if ((err = phook_assemble_detour((uint64_t)source, (uint64_t)target, NULL,
+                &detour_length)) != OK) {
+        return err;
+    }
+
+    // Second, let's find the prologue size that we can safely override
+    if ((err = phook_find_instruction_boundary(0, (uint64_t)source,
+                    detour_length, &prologue_length)) != OK) {
+        return err;
+    }
+
+    // Third, let's allocate size for the return trampoline. The trampoline
+    // will be made of:
+    //  - the source function prologue, prologue_length bytes
+    //  - the trampoline+prologue_length -> source+prologue_length jump,
+    //    detour_length bytes (hopefully)
+    *return_trampoline = mmap(0, prologue_length+detour_length,
+            PROT_READ|PROT_WRITE|PROT_EXEC, MAP_SHARED|MAP_ANONYMOUS, 0, 0);
+    if (*return_trampoline == MAP_FAILED)
+        return MALLOC_FAILED;
+    
+    // Fourth, let's copy the first part of the trampoline (see above)
+    memcpy(*return_trampoline, source, prologue_length);
+
+    // Fifth, let's assemble the return jump (see above)
+    if ((err = phook_assemble_detour(
+                    ((uint64_t)*return_trampoline)+prologue_length,
+                    ((uint64_t)source)+prologue_length,
+                    *return_trampoline+prologue_length, &detour_length)) != OK) {
+        return err;
+    }
+
+    // Finally, we can hook the source function.
+    if ((err = phook_assemble_detour(
+                    (uint64_t)source, (uint64_t)target,
+                    source, &detour_length)) != OK) {
+        return err;
+    }
 
     return OK;
 }

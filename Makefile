@@ -1,4 +1,4 @@
-CFLAGS := -Wall -Werror -lelf -lcapstone -std=c99 -fPIC -O2 -shared
+CFLAGS := -Wall -Werror -lelf -lcapstone -std=gnu99 -fPIC -O2 -shared
 
 phook.so: phook.o
 	gcc phook.o -o phook.so $(CFLAGS)

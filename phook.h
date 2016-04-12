@@ -80,4 +80,7 @@ phook_error_t phook_find_instruction_boundary(pid_t process,
 phook_error_t phook_assemble_detour(uint64_t source, uint64_t target,
         uint8_t *out, uint64_t *len);
 
+phook_error_t
+phook_local_hook(void *source, void *target, void **return_trampoline);
+
 #endif // __PHOOK_H__
