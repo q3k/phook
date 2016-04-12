@@ -27,12 +27,12 @@ Allocate an RWX buffer in a running process
 Load .so into dynamic running process
 -------------------------------------
 
-/In progres.../
+_In progres..._
 
 Load .so into static running process
 ------------------------------------
 
-/In progress.../
+_In progress..._
 
 
 Hook local process function
