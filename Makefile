@@ -5,3 +5,4 @@ phook.so: phook.o
 default: phook.so
 clean:
 	rm -rf phook.so phook.o
+.PHONY: default clean
