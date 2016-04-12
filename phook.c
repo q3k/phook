@@ -386,16 +386,23 @@ cleanup:
 }
 
 struct {
-    uint8_t code_0[6];
+    uint8_t code_0[11];
     uint64_t address;
-    uint8_t code_1;
+    uint8_t code_1[7];
 } __attribute__((packed)) detour_shellcode = {
     .code_0 = {
         0x48, 0x83, 0xec, 0x08, // sub rsp, 8
-        0x00, 0xff              // mov [rsp], address
+        0x50,                   // push rax
+        0x48, 0x83, 0xc4, 0x10, // add rsp, 16
+        0x48, 0xb8,             // mox rax, address
     },
     .address = 0xdeadbeefcafebabe,
-    .code_1 = 0xc3  // ret
+    .code_1 = {
+        0x50,                   // push rax
+        0x48, 0x83, 0xec, 0x08, // sub rsp, 8
+        0x58,                   // pop rax
+        0xc3                    // ret
+    }
 };
 
 phook_error_t
